@@ -34,9 +34,10 @@ func NewScheduler(orch *Orchestrator, cfg *config.Config) *Scheduler {
 // ScheduleJob finds the best worker for a job or spawns a new one if needed
 func (s *Scheduler) ScheduleJob(req *protocol.ComputeRequest) (*protocol.JobResponse, error) {
 	estimatedCPU := s.estimator.EstimateCPUUsage(req)
+	loadTime := s.estimator.EstimateJobDuration(req)
 
-	log.Printf("[Scheduler] Job request: operation=%s, iterations=%d, estimated_cpu=%.1f%%",
-		req.Operation, req.Data.Iterations, estimatedCPU)
+	log.Printf("[Scheduler] Job request: cpu_load=%.1f%%, load_time=%.1fs",
+		estimatedCPU, loadTime)
 
 	// Try to find a suitable existing worker
 	worker := s.findSuitableWorker(estimatedCPU)

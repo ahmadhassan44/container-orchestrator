@@ -2,62 +2,63 @@ package worker
 
 import (
 	"math"
-	"math/rand"
 	"sync"
 	"time"
 )
 
-func PerformMonteCarlo(iterations int64, threads int) float64 {
+// GenerateCPULoad creates CPU load at specified percentage for specified duration
+// cpuPercent: target CPU utilization (0-100)
+// durationSeconds: how long to sustain the load
+// threads: number of goroutines to use (from GOMAXPROCS)
+func GenerateCPULoad(cpuPercent float64, durationSeconds float64, threads int) float64 {
 	var wg sync.WaitGroup
 	wg.Add(threads)
 
-	chunkSize := iterations / int64(threads)
+	// Calculate work/sleep ratio to achieve target CPU percentage
+	// cpuPercent of 50 means: work 50ms, sleep 50ms in each 100ms window
+	workRatio := cpuPercent / 100.0
 
-	// Create a channel to collect results from goroutines
-	results := make(chan int64, threads)
+	// Use 10ms as the base time quantum for work/sleep cycles
+	quantumMs := 10 * time.Millisecond
+	workTime := time.Duration(float64(quantumMs) * workRatio)
+	sleepTime := quantumMs - workTime
 
-	// We generate a base seed once
-	baseSeed := time.Now().UnixNano()
+	endTime := time.Now().Add(time.Duration(durationSeconds * float64(time.Second)))
 
-	for i := range threads {
-		// Capture 'i' for the closure
-		threadIndex := int64(i)
+	// Track total operations performed (for result)
+	var totalOps uint64
+	var mu sync.Mutex
 
+	for i := 0; i < threads; i++ {
 		go func() {
 			defer wg.Done()
 
-			// FIX: Unique Seed per Goroutine
-			// We add the threadIndex to ensure that even if two threads start
-			// at the exact same nanosecond, they have different seeds.
-			// This guarantees statistically independent random sequences.
-			currentSeed := baseSeed + threadIndex
-			r := rand.New(rand.NewSource(currentSeed))
+			var localOps uint64
 
-			var pointsInsideCircle int64 = 0
+			for time.Now().Before(endTime) {
+				// Work phase: perform CPU-intensive math operations
+				workStart := time.Now()
+				for time.Since(workStart) < workTime {
+					// CPU-intensive floating point operations
+					_ = math.Sqrt(math.Pow(float64(localOps), 2) + math.Pow(3.14159, 2))
+					_ = math.Sin(float64(localOps)) * math.Cos(float64(localOps))
+					localOps++
+				}
 
-			for j := int64(0); j < chunkSize; j++ {
-				x := r.Float64()
-				y := r.Float64()
-
-				// HEAVY MATH: CPU-bound floating point operations
-				distance := math.Sqrt(math.Pow(x, 2) + math.Pow(y, 2))
-
-				if distance <= 1.0 {
-					pointsInsideCircle++
+				// Sleep phase: reduce CPU usage
+				if sleepTime > 0 {
+					time.Sleep(sleepTime)
 				}
 			}
-			results <- pointsInsideCircle
+
+			mu.Lock()
+			totalOps += localOps
+			mu.Unlock()
 		}()
 	}
 
 	wg.Wait()
-	close(results)
 
-	var totalInside int64 = 0
-	for count := range results {
-		totalInside += count
-	}
-
-	// Return the estimated value of Pi
-	return 4.0 * float64(totalInside) / float64(iterations)
+	// Return total operations performed as a metric
+	return float64(totalOps)
 }

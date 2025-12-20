@@ -16,30 +16,34 @@ type WorkerHandler struct {
 }
 
 func (h *WorkerHandler) StartJob(w http.ResponseWriter, r *http.Request) {
-	// 1. Parse the realistic business request
+	// 1. Parse the CPU load request
 	var req protocol.ComputeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	// 2. Validate "Business Rules"
-	if req.Data.Iterations <= 0 {
-		http.Error(w, "Iterations must be positive", http.StatusBadRequest)
+	// 2. Validate request parameters
+	if req.CPULoad <= 0 || req.CPULoad > 100 {
+		http.Error(w, "cpu_load must be between 0 and 100", http.StatusBadRequest)
+		return
+	}
+	if req.LoadTime <= 0 {
+		http.Error(w, "load_time must be positive", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[%s] Starting Simulation: %s with N=%d",
-		h.WorkerID, req.Operation, req.Data.Iterations)
+	log.Printf("[%s] Starting CPU Load: %.1f%% for %.1fs",
+		h.WorkerID, req.CPULoad, req.LoadTime)
 
-	// 3. Execute Real Work
+	// 3. Execute CPU load simulation
 	startTime := time.Now()
 
 	// Dynamically use all assigned threads (e.g., 2)
 	numThreads := runtime.GOMAXPROCS(0)
 
-	// The CPU load is now governed entirely by 'req.Data.Iterations'
-	result := PerformMonteCarlo(req.Data.Iterations, numThreads)
+	// Generate CPU load that matches the requested percentage and duration
+	result := GenerateCPULoad(req.CPULoad, req.LoadTime, numThreads)
 
 	duration := time.Since(startTime)
 

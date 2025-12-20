@@ -50,12 +50,12 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate request
-	if req.Operation == "" {
-		http.Error(w, "Missing 'operation' field", http.StatusBadRequest)
+	if req.CPULoad <= 0 || req.CPULoad > 100 {
+		http.Error(w, "cpu_load must be between 0 and 100", http.StatusBadRequest)
 		return
 	}
-	if req.Data.Iterations <= 0 {
-		http.Error(w, "Iterations must be positive", http.StatusBadRequest)
+	if req.LoadTime <= 0 {
+		http.Error(w, "load_time must be positive", http.StatusBadRequest)
 		return
 	}
 

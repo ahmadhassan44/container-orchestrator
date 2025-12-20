@@ -1,21 +1,19 @@
 package protocol
 
 type ComputeRequest struct {
-	// Operation tells the worker which algorithm to run.
-	// e.g., "monte_carlo_pi", "prime_search", "matrix_determinant"
-	Operation string `json:"operation"`
+	// CPULoad is the target CPU usage percentage (0-100)
+	// Example: 50 means 50% CPU utilization
+	CPULoad float64 `json:"cpu_load"`
 
-	// Data contains the parameters that govern the CPU complexity.
-	Data JobParameters `json:"data"`
+	// LoadTime is how long the CPU should be loaded (in seconds)
+	// Example: 5.0 means sustain the load for 5 seconds
+	LoadTime float64 `json:"load_time"`
 }
 
 type JobParameters struct {
-	// Iterations is the "N".
-	// A value of 1,000 is fast. A value of 10,000,000,000 is heavy.
-	Iterations int64 `json:"iterations"`
-
-	// Seed is used for deterministic random number generation (optional but realistic).
-	Seed int64 `json:"seed"`
+	// Deprecated: kept for backwards compatibility
+	Iterations int64 `json:"iterations,omitempty"`
+	Seed       int64 `json:"seed,omitempty"`
 }
 
 type JobResponse struct {

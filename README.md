@@ -53,34 +53,28 @@ go run ./cmd/gateway/main.go
 ### Submit Jobs
 
 ```bash
-# Small job (quick burst)
+# Low CPU load (25% for 3 seconds)
 curl -X POST http://localhost:3000/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "operation": "monte_carlo_pi",
-    "data": {
-      "iterations": 1000000
-    }
+    "cpu_load": 25,
+    "load_time": 3
   }'
 
-# Medium job (moderate CPU)
+# Medium CPU load (50% for 5 seconds)
 curl -X POST http://localhost:3000/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "operation": "monte_carlo_pi",
-    "data": {
-      "iterations": 100000000
-    }
+    "cpu_load": 50,
+    "load_time": 5
   }'
 
-# Large job (heavy CPU)
+# High CPU load (80% for 10 seconds)
 curl -X POST http://localhost:3000/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "operation": "monte_carlo_pi",
-    "data": {
-      "iterations": 10000000000
-    }
+    "cpu_load": 80,
+    "load_time": 10
   }'
 ```
 
@@ -108,13 +102,14 @@ curl http://localhost:3000/health
 6. Worker executes job and returns result
 7. Scheduler updates CPU tracking and checks for proactive spawn
 
-### CPU Estimation
+### CPU Load Model
 
-The scheduler estimates CPU usage based on:
+The system uses a **direct CPU load specification** model:
 
-- **Algorithm type**: Currently supports Monte Carlo Pi calculation
-- **Iteration count**: More iterations = higher CPU usage
-- **Expected duration**: Sub-second jobs = low CPU, multi-second jobs = high CPU
+- **Client specifies exact CPU percentage** (0-100): Target CPU utilization
+- **Client specifies load duration** (seconds): How long to sustain the load
+- **Worker generates synthetic load**: Uses work/sleep cycles to match requested percentage
+- **Accurate scheduling**: Scheduler directly uses client-specified values for routing decisions
 
 ### Load Balancing Strategy
 
@@ -134,18 +129,19 @@ The scheduler estimates CPU usage based on:
 
 ### POST /submit
 
-Submit a compute job.
+Submit a CPU load job.
 
 **Request:**
 
 ```json
 {
-  "operation": "monte_carlo_pi",
-  "data": {
-    "iterations": 1000000
-  }
+  "cpu_load": 50,
+  "load_time": 5
 }
 ```
+
+- `cpu_load`: Target CPU utilization percentage (0-100)
+- `load_time`: Duration in seconds to sustain the load
 
 **Response:**
 
@@ -153,10 +149,12 @@ Submit a compute job.
 {
   "job_id": "JOB-1734739200",
   "worker_id": "Worker-Core-1",
-  "result": 3.141592,
-  "time_taken": "1.24s"
+  "result": 125000000,
+  "time_taken": "5.01s"
 }
 ```
+
+- `result`: Total operations performed (metric)
 
 ### GET /status
 
@@ -204,11 +202,15 @@ container-orchestrator/
 └── start.sh           # Build and run script
 ```
 
-### Adding New Algorithms
+### Customizing CPU Load Generation
 
-1. Add case to `EstimateCPUUsage()` in `internal/scheduler/estimator.go`
-2. Implement handler in `internal/worker/handler.go`
-3. Update protocol types if needed in `pkg/protocol/types.go`
+The CPU load generator in `internal/worker/cpu_load.go` uses work/sleep cycles:
+
+1. **Work phase**: Performs CPU-intensive math operations
+2. **Sleep phase**: Reduces CPU to achieve target percentage
+3. **Quantum**: 10ms time slices for smooth load distribution
+
+To modify load characteristics, adjust the `GenerateCPULoad()` function.
 
 ## License
 
