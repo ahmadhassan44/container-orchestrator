@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -19,25 +20,36 @@ var coreMaps = map[int]string{
 	3: "3,7", // Execution Zone C
 }
 
+// WorkerInfo tracks the state and metrics of a running worker container
+type WorkerInfo struct {
+	CoreID        int
+	ContainerID   string
+	HostPort      int
+	CurrentCPU    float64   // Current CPU usage percentage (0-100)
+	LastHeartbeat time.Time // Last successful health check
+	IsHealthy     bool
+}
+
 type Orchestrator struct {
-	cli         *client.Client
-	ctx         context.Context
-	mu          sync.Mutex     // Thread-safe lock
-	workerState map[int]string // Map[CoreID] -> ContainerID
+	cli            *client.Client
+	ctx            context.Context
+	mu             sync.RWMutex        // Thread-safe lock (RWMutex for better concurrency)
+	workers        map[int]*WorkerInfo // Map[CoreID] -> WorkerInfo
+	workerBasePort int                 // Base port for workers (e.g., 8000)
 }
 
 // NewOrchestrator initializes the Docker client and internal state
-func NewOrchestrator(ctx context.Context) (*Orchestrator, error) {
+func NewOrchestrator(ctx context.Context, basePort int) (*Orchestrator, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
 
 	return &Orchestrator{
-		cli: cli,
-		ctx: ctx,
-		// Initialize state: All cores (1, 2, 3) are currently empty ("")
-		workerState: map[int]string{1: "", 2: "", 3: ""},
+		cli:            cli,
+		ctx:            ctx,
+		workers:        make(map[int]*WorkerInfo),
+		workerBasePort: basePort,
 	}, nil
 }
 
@@ -55,48 +67,114 @@ func (o *Orchestrator) StartWorker(coreID int) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	// 1. Validation
-	currentID, validCore := o.workerState[coreID]
-	if !validCore {
-		return "", fmt.Errorf("invalid core ID: %d", coreID)
-	}
-	if currentID != "" {
-		return "", fmt.Errorf("core %d is already busy with container %s", coreID, currentID)
+	// Validate core ID
+	if _, validCore := coreMaps[coreID]; !validCore {
+		return "", fmt.Errorf("invalid core ID: %d (valid: 1, 2, 3)", coreID)
 	}
 
-	// 2. Topology Lookup
+	// Check if core is already occupied
+	if worker, exists := o.workers[coreID]; exists {
+		return "", fmt.Errorf("core %d already has worker %s", coreID, worker.ContainerID[:12])
+	}
+
+	// Topology Lookup
 	cpuSet := coreMaps[coreID]
-	hostPort := fmt.Sprintf("%d", 8000+coreID) // Core 1 -> Port 8001
+	hostPort := o.workerBasePort + coreID
 
-	fmt.Printf("⚡ Spawning Worker on Core %d (Threads: %s) -> Port %s\n", coreID, cpuSet, hostPort)
+	log.Printf("[Orchestrator] Spawning worker on Core %d (CPUs: %s, Port: %d)", coreID, cpuSet, hostPort)
 
-	// 3. Container Config
+	// Container Config
 	config := &container.Config{
 		Image: "container-orchestrator-worker:latest",
 		Env:   []string{fmt.Sprintf("WORKER_ID=Worker-Core-%d", coreID)},
 	}
 
-	// 4. Host Config (THE ISOLATION LOGIC)
+	// Host Config - CPU pinning and port mapping
 	hostConfig := &container.HostConfig{
 		Resources: container.Resources{
-			CpusetCpus: cpuSet, // This is what pins the process to hardware!
+			CpusetCpus: cpuSet,
 		},
 		PortBindings: nat.PortMap{
-			"8080/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: hostPort}},
+			"8080/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", hostPort)}},
 		},
 	}
 
-	// 5. Create & Start
+	// Create container
 	resp, err := o.cli.ContainerCreate(o.ctx, config, hostConfig, nil, nil, "")
 	if err != nil {
-		return "", fmt.Errorf("create failed: %w", err)
+		return "", fmt.Errorf("container creation failed: %w", err)
 	}
 
+	// Start container
 	if err := o.cli.ContainerStart(o.ctx, resp.ID, container.StartOptions{}); err != nil {
-		return "", fmt.Errorf("start failed: %w", err)
+		return "", fmt.Errorf("container start failed: %w", err)
 	}
 
-	// 6. Update State
-	o.workerState[coreID] = resp.ID
+	// Update internal state
+	o.workers[coreID] = &WorkerInfo{
+		CoreID:        coreID,
+		ContainerID:   resp.ID,
+		HostPort:      hostPort,
+		CurrentCPU:    0.0,
+		LastHeartbeat: time.Now(),
+		IsHealthy:     true,
+	}
+
+	log.Printf("[Orchestrator] Worker started: Core=%d, Container=%s, Port=%d",
+		coreID, resp.ID[:12], hostPort)
+
 	return resp.ID, nil
+}
+
+// GetWorkerByCore retrieves worker info for a specific core
+func (o *Orchestrator) GetWorkerByCore(coreID int) (*WorkerInfo, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	worker, exists := o.workers[coreID]
+	return worker, exists
+}
+
+// GetAllWorkers returns a snapshot of all active workers
+func (o *Orchestrator) GetAllWorkers() []*WorkerInfo {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	workers := make([]*WorkerInfo, 0, len(o.workers))
+	for _, worker := range o.workers {
+		workers = append(workers, worker)
+	}
+	return workers
+}
+
+// UpdateWorkerCPU updates the CPU usage metric for a worker
+func (o *Orchestrator) UpdateWorkerCPU(coreID int, cpuPercent float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if worker, exists := o.workers[coreID]; exists {
+		worker.CurrentCPU = cpuPercent
+		worker.LastHeartbeat = time.Now()
+	}
+}
+
+// GetNextAvailableCore finds the first unoccupied core
+func (o *Orchestrator) GetNextAvailableCore() (int, error) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for coreID := 1; coreID <= 3; coreID++ {
+		if _, exists := o.workers[coreID]; !exists {
+			return coreID, nil
+		}
+	}
+
+	return 0, fmt.Errorf("no available cores (all 3 cores occupied)")
+}
+
+// GetWorkerCount returns the number of active workers
+func (o *Orchestrator) GetWorkerCount() int {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return len(o.workers)
 }
