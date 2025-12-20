@@ -15,8 +15,10 @@ func GenerateCPULoad(cpuPercent float64, durationSeconds float64, threads int) f
 	wg.Add(threads)
 
 	// Calculate work/sleep ratio to achieve target CPU percentage
-	// cpuPercent of 50 means: work 50ms, sleep 50ms in each 100ms window
-	workRatio := cpuPercent / 100.0
+	// Since we have multiple threads, divide the CPU load by thread count
+	// Example: 50% CPU with 2 threads means each thread does 25% work
+	perThreadCPU := cpuPercent / float64(threads)
+	workRatio := perThreadCPU / 100.0
 
 	// Use 10ms as the base time quantum for work/sleep cycles
 	quantumMs := 10 * time.Millisecond
