@@ -178,3 +178,41 @@ func (o *Orchestrator) GetWorkerCount() int {
 	defer o.mu.RUnlock()
 	return len(o.workers)
 }
+
+// Shutdown stops and removes all worker containers
+func (o *Orchestrator) Shutdown() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	log.Println("[Orchestrator] Shutting down and cleaning up workers...")
+
+	var errors []error
+	for coreID, worker := range o.workers {
+		log.Printf("[Orchestrator] Stopping worker on Core %d (Container: %s)", coreID, worker.ContainerID[:12])
+
+		// Stop container with 10 second timeout
+		timeout := 10
+		if err := o.cli.ContainerStop(o.ctx, worker.ContainerID, container.StopOptions{Timeout: &timeout}); err != nil {
+			log.Printf("[WARNING] Failed to stop container %s: %v", worker.ContainerID[:12], err)
+			errors = append(errors, err)
+		}
+
+		// Remove container
+		if err := o.cli.ContainerRemove(o.ctx, worker.ContainerID, container.RemoveOptions{Force: true}); err != nil {
+			log.Printf("[WARNING] Failed to remove container %s: %v", worker.ContainerID[:12], err)
+			errors = append(errors, err)
+		} else {
+			log.Printf("[Orchestrator] Removed worker on Core %d", coreID)
+		}
+	}
+
+	// Clear the workers map
+	o.workers = make(map[int]*WorkerInfo)
+
+	if len(errors) > 0 {
+		return fmt.Errorf("encountered %d errors during shutdown", len(errors))
+	}
+
+	log.Println("[Orchestrator] Cleanup completed")
+	return nil
+}

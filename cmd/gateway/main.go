@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/ahmadhassan44/container-orchestrator/internal/gateway"
@@ -30,6 +33,25 @@ func main() {
 
 	// Verify Docker connectivity
 	orch.CheckConnectivity()
+
+	// Setup cleanup on shutdown
+	defer func() {
+		if err := orch.Shutdown(); err != nil {
+			log.Printf("[ERROR] Shutdown errors: %v", err)
+		}
+	}()
+
+	// Handle shutdown signals (Ctrl+C, etc.)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Println("\n[Gateway] Shutdown signal received")
+		if err := orch.Shutdown(); err != nil {
+			log.Printf("[ERROR] Shutdown errors: %v", err)
+		}
+		os.Exit(0)
+	}()
 
 	// Initialize scheduler
 	sched := gateway.NewScheduler(orch, cfg) // Spawn initial workers
