@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,9 +26,7 @@ func NewScheduler(orch *Orchestrator, cfg *config.Config) *Scheduler {
 		orchestrator: orch,
 		estimator:    NewCPUEstimator(),
 		config:       cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient:   &http.Client{}, // Timeout set per request
 	}
 }
 
@@ -123,7 +122,12 @@ func (s *Scheduler) executeJobOnWorker(worker *WorkerInfo, req *protocol.Compute
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	// Set dynamic timeout: job duration + 10 second buffer for overhead
+	jobTimeout := time.Duration(req.LoadTime)*time.Second + 10*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}

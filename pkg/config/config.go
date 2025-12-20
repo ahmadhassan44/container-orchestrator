@@ -25,8 +25,8 @@ type Config struct {
 // LoadConfig reads configuration from environment variables with sensible defaults
 func LoadConfig() *Config {
 	return &Config{
-		MaxCPUThreshold:   getEnvAsFloat("MAX_CPU_THRESHOLD", 80.0),
-		PreSpawnThreshold: getEnvAsFloat("PRESPAWN_THRESHOLD", 70.0),
+		MaxCPUThreshold:   getEnvAsFloat("MAX_CPU_THRESHOLD", 100.0),
+		PreSpawnThreshold: getEnvAsFloat("PRESPAWN_THRESHOLD", 99.0),
 		GatewayPort:       getEnvAsInt("GATEWAY_PORT", 3000),
 		WorkerBasePort:    getEnvAsInt("WORKER_BASE_PORT", 8000),
 		InitialWorkers:    getEnvAsInt("INITIAL_WORKERS", 1),
