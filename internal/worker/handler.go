@@ -23,16 +23,6 @@ func (h *WorkerHandler) StartJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Validate request parameters
-	if req.CPULoad <= 0 || req.CPULoad > 100 {
-		http.Error(w, "cpu_load must be between 0 and 100", http.StatusBadRequest)
-		return
-	}
-	if req.LoadTime <= 0 {
-		http.Error(w, "load_time must be positive", http.StatusBadRequest)
-		return
-	}
-
 	log.Printf("[%s] Starting CPU Load: %.1f%% for %.1fs",
 		h.WorkerID, req.CPULoad, req.LoadTime)
 

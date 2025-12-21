@@ -51,8 +51,8 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate request
-	if req.CPULoad <= 0 || req.CPULoad > 100 {
-		http.Error(w, "cpu_load must be between 0 and 100", http.StatusBadRequest)
+	if req.CPULoad <= 0 || req.CPULoad > 200 {
+		http.Error(w, "cpu_load must be between 0 and 200", http.StatusBadRequest)
 		return
 	}
 	if req.LoadTime <= 0 {
