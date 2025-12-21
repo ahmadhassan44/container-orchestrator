@@ -153,7 +153,12 @@ func (o *Orchestrator) UpdateWorkerCPU(coreID int, cpuPercent float64) {
 	defer o.mu.Unlock()
 
 	if worker, exists := o.workers[coreID]; exists {
-		worker.CurrentCPU = cpuPercent
+		// Ensure CPU usage never goes below 0%
+		if cpuPercent < 0 {
+			worker.CurrentCPU = 0.0
+		} else {
+			worker.CurrentCPU = cpuPercent
+		}
 		worker.LastHeartbeat = time.Now()
 	}
 }

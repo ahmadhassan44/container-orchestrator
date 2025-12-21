@@ -18,6 +18,7 @@ A high-performance container orchestration system with CPU-aware load balancing 
 - **Configurable Thresholds**: Control max CPU usage per worker
 - **Auto-scaling**: Spawns workers on-demand when load increases
 - **Proactive Spawning**: Pre-spawns containers when all workers approach threshold
+- **Job Queuing**: Optional FIFO queue for jobs when all workers are busy (see [JOB_QUEUE_README.md](JOB_QUEUE_README.md))
 - **Clean Logging**: Structured, informative logs without clutter
 
 ## Configuration

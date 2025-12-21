@@ -29,6 +29,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/submit", s.handleSubmit)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/status", s.handleStatus)
+	mux.HandleFunc("/queue", s.handleQueueStatus) // New endpoint for queue status
 
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[Gateway] HTTP server listening on %s", addr)
@@ -80,15 +81,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleStatus returns current system status
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	workers := s.scheduler.GetWorkerStatus()
+	queueStatus := s.scheduler.GetQueueStatus()
 
 	status := map[string]interface{}{
 		"status":       "running",
 		"worker_count": len(workers),
 		"workers":      workers,
+		"queue":        queueStatus, // Include queue status
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// handleQueueStatus returns detailed queue information
+func (s *Server) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
+	queueStatus := s.scheduler.GetQueueStatus()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(queueStatus)
 }
 
 // loggingMiddleware logs all incoming HTTP requests
