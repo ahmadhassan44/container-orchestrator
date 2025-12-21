@@ -162,7 +162,7 @@ declare -a PIDS2
 for i in {1..3}; do
     (curl -s -X POST $GATEWAY_URL/submit \
         -H "Content-Type: application/json" \
-        -d '{"cpu_load": 100, "load_time": 60}' > /tmp/max_response_$i.json) &
+        -d '{"cpu_load": 190, "load_time": 60}' > /tmp/max_response_$i.json) &
     PIDS2[$i]=$!
 done
 

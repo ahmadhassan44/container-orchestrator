@@ -18,17 +18,17 @@ import (
 // JOB QUEUING FEATURE - Can be enabled/disabled by setting ENABLE_JOB_QUEUE
 // ============================================================================
 const (
-	ENABLE_JOB_QUEUE = true  // Set to false to disable job queuing
-	MAX_QUEUE_SIZE   = 100   // Maximum number of queued jobs
-	QUEUE_TIMEOUT    = 30    // Seconds to wait in queue before giving up
+	ENABLE_JOB_QUEUE = true // Set to false to disable job queuing
+	MAX_QUEUE_SIZE   = 100  // Maximum number of queued jobs
+	QUEUE_TIMEOUT    = 300  // Seconds to wait in queue before giving up
 )
 
 // QueuedJob represents a job waiting to be scheduled
 type QueuedJob struct {
-	request     *protocol.ComputeRequest
-	responseCh  chan *protocol.JobResponse
-	errorCh     chan error
-	enqueuedAt  time.Time
+	request      *protocol.ComputeRequest
+	responseCh   chan *protocol.JobResponse
+	errorCh      chan error
+	enqueuedAt   time.Time
 	estimatedCPU float64
 }
 
@@ -39,9 +39,9 @@ type Scheduler struct {
 	config       *config.Config
 	httpClient   *http.Client
 	scheduleMux  sync.Mutex // Prevents race conditions in concurrent scheduling
-	
+
 	// Job Queue (can be disabled by setting ENABLE_JOB_QUEUE = false)
-	jobQueue     chan *QueuedJob
+	jobQueue        chan *QueuedJob
 	queueWorkerStop chan struct{}
 }
 
@@ -52,16 +52,16 @@ func NewScheduler(orch *Orchestrator, cfg *config.Config) *Scheduler {
 		config:       cfg,
 		httpClient:   &http.Client{}, // Timeout set per request
 	}
-	
+
 	// Initialize job queue if enabled
 	if ENABLE_JOB_QUEUE {
 		s.jobQueue = make(chan *QueuedJob, MAX_QUEUE_SIZE)
 		s.queueWorkerStop = make(chan struct{})
 		go s.processJobQueue()
-		log.Printf("[Scheduler] Job queuing ENABLED (max queue size: %d, timeout: %ds)", 
+		log.Printf("[Scheduler] Job queuing ENABLED (max queue size: %d, timeout: %ds)",
 			MAX_QUEUE_SIZE, QUEUE_TIMEOUT)
 	}
-	
+
 	return s
 }
 
@@ -79,7 +79,7 @@ func (s *Scheduler) ScheduleJob(req *protocol.ComputeRequest) (*protocol.JobResp
 	if ENABLE_JOB_QUEUE {
 		return s.scheduleJobWithQueue(req, estimatedCPU, loadTime)
 	}
-	
+
 	// Original scheduling logic (without queuing)
 	return s.scheduleJobDirect(req, estimatedCPU, loadTime)
 }
@@ -157,7 +157,7 @@ func (s *Scheduler) scheduleJobWithQueue(req *protocol.ComputeRequest, estimated
 	// Try immediate scheduling first
 	s.scheduleMux.Lock()
 	worker := s.findSuitableWorker(estimatedCPU)
-	
+
 	if worker == nil {
 		// Try to spawn a new worker
 		coreID, err := s.orchestrator.GetNextAvailableCore()
@@ -169,25 +169,25 @@ func (s *Scheduler) scheduleJobWithQueue(req *protocol.ComputeRequest, estimated
 			}
 		}
 	}
-	
+
 	if worker != nil {
 		// Found a worker - schedule immediately
 		s.orchestrator.UpdateWorkerCPU(worker.CoreID, worker.CurrentCPU+estimatedCPU)
 		s.scheduleMux.Unlock()
-		
+
 		log.Printf("[Scheduler] Routing job to Worker-Core-%d (port %d, current_cpu=%.1f%%)",
 			worker.CoreID, worker.HostPort, worker.CurrentCPU)
-		
+
 		response, err := s.executeJobOnWorker(worker, req)
 		s.orchestrator.UpdateWorkerCPU(worker.CoreID, worker.CurrentCPU-estimatedCPU)
 		s.checkProactiveSpawn()
 		return response, err
 	}
-	
+
 	// No worker available - queue the job
 	s.scheduleMux.Unlock()
 	log.Printf("[Scheduler] All workers busy, queueing job (cpu_load=%.1f%%)", estimatedCPU)
-	
+
 	queuedJob := &QueuedJob{
 		request:      req,
 		responseCh:   make(chan *protocol.JobResponse, 1),
@@ -195,7 +195,7 @@ func (s *Scheduler) scheduleJobWithQueue(req *protocol.ComputeRequest, estimated
 		enqueuedAt:   time.Now(),
 		estimatedCPU: estimatedCPU,
 	}
-	
+
 	select {
 	case s.jobQueue <- queuedJob:
 		// Job queued successfully, wait for response
@@ -216,15 +216,15 @@ func (s *Scheduler) scheduleJobWithQueue(req *protocol.ComputeRequest, estimated
 func (s *Scheduler) processJobQueue() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	log.Printf("[Scheduler] Queue processor started")
-	
+
 	for {
 		select {
 		case <-s.queueWorkerStop:
 			log.Printf("[Scheduler] Queue processor stopping")
 			return
-			
+
 		case <-ticker.C:
 			// Try to process pending jobs
 			s.tryProcessQueue()
@@ -245,54 +245,54 @@ func (s *Scheduler) tryProcessQueue() {
 				queuedJob.errorCh <- fmt.Errorf("job expired in queue")
 				continue // Try next job in queue
 			}
-			
+
 			// Try to schedule the queued job
 			s.scheduleMux.Lock()
 			worker := s.findSuitableWorker(queuedJob.estimatedCPU)
-			
+
 			if worker != nil {
 				// Worker available - schedule it
 				s.orchestrator.UpdateWorkerCPU(worker.CoreID, worker.CurrentCPU+queuedJob.estimatedCPU)
 				s.scheduleMux.Unlock()
-				
+
 				waitTime := time.Since(queuedJob.enqueuedAt)
-				log.Printf("[Scheduler] Dequeued job (waited %.1fs) → Worker-Core-%d", 
+				log.Printf("[Scheduler] Dequeued job (waited %.1fs) → Worker-Core-%d",
 					waitTime.Seconds(), worker.CoreID)
-				
+
 				// Execute job asynchronously so we can process more queue items
 				go func(w *WorkerInfo, job *QueuedJob) {
 					response, err := s.executeJobOnWorker(w, job.request)
 					s.orchestrator.UpdateWorkerCPU(w.CoreID, w.CurrentCPU-job.estimatedCPU)
-					
+
 					if err != nil {
 						job.errorCh <- err
 					} else {
 						job.responseCh <- response
 					}
-					
+
 					s.checkProactiveSpawn()
 				}(worker, queuedJob)
-				
+
 				// Continue to next queued job immediately
 				continue
 			} else {
-			// Still no worker available - put job back and stop processing this tick
-			s.scheduleMux.Unlock()
-			
-			// Try to put job back at front of queue
-			go func(job *QueuedJob) {
-				select {
-				case s.jobQueue <- job:
-					// Requeued successfully
-				case <-time.After(1 * time.Second):
-					// Couldn't requeue - fail the job
-					job.errorCh <- fmt.Errorf("failed to requeue job")
-				}
-			}(queuedJob)
-			
-			return // Stop processing this tick
-		}
-		
+				// Still no worker available - put job back and stop processing this tick
+				s.scheduleMux.Unlock()
+
+				// Try to put job back at front of queue
+				go func(job *QueuedJob) {
+					select {
+					case s.jobQueue <- job:
+						// Requeued successfully
+					case <-time.After(1 * time.Second):
+						// Couldn't requeue - fail the job
+						job.errorCh <- fmt.Errorf("failed to requeue job")
+					}
+				}(queuedJob)
+
+				return // Stop processing this tick
+			}
+
 		default:
 			// No more jobs in queue
 			return
@@ -315,7 +315,7 @@ func (s *Scheduler) GetQueueStatus() map[string]interface{} {
 			"enabled": false,
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"enabled":    true,
 		"queue_size": len(s.jobQueue),
